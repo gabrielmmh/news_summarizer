@@ -1,0 +1,134 @@
+version: '3.8'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.10.0-python3.10
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    _PIP_ADDITIONAL_REQUIREMENTS: ''
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./src:/opt/airflow/src
+    - ./config:/opt/airflow/config
+    - ./.env:/opt/airflow/.env
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    minio:
+      condition: service_started
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - airflow-network
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: always
+    networks:
+      - airflow-network
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    container_name: airflow-webserver
+    networks:
+      - airflow-network
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    container_name: airflow-scheduler
+    networks:
+      - airflow-network
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /sources/logs /sources/dags /sources/plugins
+        chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        exec /entrypoint airflow version
+        airflow db init
+        airflow users create \
+          --username airflow \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password airflow
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+    user: "0:0"
+    volumes:
+      - ./:/sources
+    networks:
+      - airflow-network
+
+volumes:
+  postgres-db-volume:
+  minio-data:
+
+networks:
+  airflow-network:
+    driver: bridge
