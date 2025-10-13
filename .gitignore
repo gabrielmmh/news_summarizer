@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
+# Airflow
+logs/*
+!logs/.gitkeep
+airflow.cfg
+airflow.db
+airflow-webserver.pid
+unittests.cfg
+
+# Environment
+.env
+.env.local
+
+# Data
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+
+# Config
+config/*
+!config/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# MinIO
+minio-data/
