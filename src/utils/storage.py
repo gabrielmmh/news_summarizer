@@ -1,5 +1,6 @@
 """Storage utilities for MinIO/S3."""
 import os
+import io
 from typing import Optional
 from datetime import datetime
 import logging
@@ -65,7 +66,7 @@ class MinIOStorage:
             self.client.put_object(
                 self.bucket_name,
                 s3_key,
-                data=html_bytes,
+                data=io.BytesIO(html_bytes),
                 length=len(html_bytes),
                 content_type='text/html'
             )
@@ -97,7 +98,7 @@ class MinIOStorage:
             self.client.put_object(
                 self.bucket_name,
                 s3_key,
-                data=summary_bytes,
+                data=io.BytesIO(summary_bytes),
                 length=len(summary_bytes),
                 content_type='text/plain'
             )
