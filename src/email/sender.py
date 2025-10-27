@@ -1,6 +1,8 @@
 """Email sender for news summaries."""
 import os
 import smtplib
+import hashlib
+import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Optional
@@ -30,8 +32,43 @@ class EmailSender:
             raise ValueError("Either SMTP_USER or RESEND_API_KEY must be set")
 
         # Setup Jinja2 template engine
-        template_dir = os.path.join(os.path.dirname(__file__), 'templates')
+        # Try multiple paths to find templates (for different execution contexts)
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), 'templates'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
+            '/opt/airflow/src/email/templates',
+        ]
+
+        template_dir = None
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isdir(path):
+                template_dir = path
+                logger.info(f"Using template directory: {template_dir}")
+                break
+
+        if not template_dir:
+            raise ValueError(f"Template directory not found. Tried: {possible_paths}")
+
         self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
+
+        # Base URL for unsubscribe links (can be configured)
+        self.base_url = os.getenv('APP_BASE_URL', 'http://localhost:8080')
+
+    def _generate_unsubscribe_token(self, email: str) -> str:
+        """
+        Generate a secure unsubscribe token for an email address.
+
+        Args:
+            email: Email address
+
+        Returns:
+            Secure token
+        """
+        # Use a secret key from environment for better security
+        secret = os.getenv('UNSUBSCRIBE_SECRET', 'default-secret-key-change-me')
+        # Create a hash of email + secret
+        token_input = f"{email}:{secret}".encode('utf-8')
+        return hashlib.sha256(token_input).hexdigest()[:32]
 
     def _convert_markdown_to_html(self, markdown_text: str) -> str:
         """
@@ -53,7 +90,9 @@ class EmailSender:
         summary_text: str,
         news_count: int,
         theme: str,
-        date_str: str
+        date_str: str,
+        email_title: str = None,
+        recipient_email: str = None
     ) -> str:
         """
         Render email template with data.
@@ -63,6 +102,8 @@ class EmailSender:
             news_count: Number of news articles
             theme: News theme
             date_str: Date string
+            email_title: Custom email title (optional)
+            recipient_email: Recipient email for unsubscribe link (optional)
 
         Returns:
             Rendered HTML
@@ -72,12 +113,27 @@ class EmailSender:
         # Convert markdown summary to HTML
         summary_html = self._convert_markdown_to_html(summary_text)
 
+        # Use custom title or default
+        email_title = email_title or 'Resumo Diário de Notícias'
+
+        # Generate unsubscribe link if email provided
+        unsubscribe_url = '#'
+        preferences_url = '#'
+        if recipient_email:
+            token = self._generate_unsubscribe_token(recipient_email)
+            encoded_email = urllib.parse.quote(recipient_email)
+            unsubscribe_url = f"{self.base_url}/unsubscribe?email={encoded_email}&token={token}"
+            preferences_url = f"{self.base_url}/preferences?email={encoded_email}&token={token}"
+
         return template.render(
             summary_html=summary_html,
             news_count=news_count,
             theme=theme.title(),
             date=date_str,
-            generated_at=datetime.now().strftime('%d/%m/%Y às %H:%M')
+            generated_at=datetime.now().strftime('%d/%m/%Y às %H:%M'),
+            email_title=email_title,
+            unsubscribe_url=unsubscribe_url,
+            preferences_url=preferences_url
         )
 
     def send_via_smtp(
@@ -170,7 +226,8 @@ class EmailSender:
         summary_text: str,
         news_count: int,
         theme: str,
-        date_str: Optional[str] = None
+        date_str: Optional[str] = None,
+        email_title: str = None
     ) -> bool:
         """
         Send news summary email to recipients.
@@ -180,6 +237,8 @@ class EmailSender:
             summary_text: Summary text (markdown format)
             news_count: Number of news articles
             theme: News theme
+            date_str: Date string (optional)
+            email_title: Custom email title (optional)
             date_str: Date string (defaults to today)
 
         Returns:
@@ -193,22 +252,34 @@ class EmailSender:
         if not date_str:
             date_str = datetime.now().strftime('%d/%m/%Y')
 
-        # Render email template
-        html_content = self._render_template(
-            summary_text=summary_text,
-            news_count=news_count,
-            theme=theme,
-            date_str=date_str
-        )
-
         # Email subject
-        subject = f"📰 Resumo de Notícias - {theme.title()} - {date_str}"
+        email_subject_title = email_title or 'Resumo Diário de Notícias'
+        subject = f"📰 {email_subject_title} - {date_str}"
 
-        # Send via appropriate method
-        if self.resend_api_key:
-            return self.send_via_resend(recipients, subject, html_content)
-        else:
-            return self.send_via_smtp(recipients, subject, html_content)
+        # Send individualized emails with unique unsubscribe links
+        success_count = 0
+        for recipient in recipients:
+            # Render email template with recipient-specific unsubscribe link
+            html_content = self._render_template(
+                summary_text=summary_text,
+                news_count=news_count,
+                theme=theme,
+                date_str=date_str,
+                email_title=email_title,
+                recipient_email=recipient
+            )
+
+            # Send via appropriate method
+            if self.resend_api_key:
+                result = self.send_via_resend([recipient], subject, html_content)
+            else:
+                result = self.send_via_smtp([recipient], subject, html_content)
+
+            if result:
+                success_count += 1
+
+        logger.info(f"Sent {success_count}/{len(recipients)} emails successfully")
+        return success_count == len(recipients)
 
     def send_failure_notification(
         self,
