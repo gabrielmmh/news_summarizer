@@ -1,27 +1,35 @@
-"""LLM-based news summarization using OpenAI."""
+"""LLM-based news summarization using Azure OpenAI."""
 import os
 from typing import List, Dict, Optional
 import logging
-from openai import OpenAI
+from openai import AzureOpenAI
 
 logger = logging.getLogger(__name__)
 
 
 class NewsSummarizer:
-    """News summarizer using OpenAI GPT-4o-mini."""
+    """News summarizer using Azure OpenAI GPT-4o."""
 
     def __init__(self):
-        """Initialize the summarizer with OpenAI."""
-        self.api_key = os.getenv('OPENAI_API_KEY')
-        self.model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+        """Initialize the summarizer with Azure OpenAI."""
+        self.api_key = os.getenv('AZURE_OPENAI_API_KEY')
+        self.endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        self.deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o_Maciel_01')
+        self.api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2025-01-01-preview')
         self.theme = os.getenv('NEWS_THEME', 'economia')
 
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY not set in environment")
+            raise ValueError("AZURE_OPENAI_API_KEY not set in environment")
+        if not self.endpoint:
+            raise ValueError("AZURE_OPENAI_ENDPOINT not set in environment")
 
-        # Initialize OpenAI client
-        self.client = OpenAI(api_key=self.api_key)
-        logger.info(f"Initialized OpenAI summarizer with model: {self.model}")
+        # Initialize Azure OpenAI client
+        self.client = AzureOpenAI(
+            api_key=self.api_key,
+            api_version=self.api_version,
+            azure_endpoint=self.endpoint
+        )
+        logger.info(f"Initialized Azure OpenAI summarizer with deployment: {self.deployment}")
 
     def _prepare_news_context(self, articles: List[Dict], max_articles: int = 20) -> str:
         """
@@ -126,16 +134,16 @@ Elabore o resumo agora:"""
             logger.warning("No articles to summarize")
             return None
 
-        logger.info(f"Summarizing {len(articles)} articles using OpenAI {self.model}")
+        logger.info(f"Summarizing {len(articles)} articles using Azure OpenAI {self.deployment}")
 
         try:
             # Prepare context
             news_context = self._prepare_news_context(articles, max_articles)
             prompt = self._build_prompt(news_context)
 
-            # Call OpenAI API
+            # Call Azure OpenAI API
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=self.deployment,
                 messages=[
                     {
                         "role": "system",
