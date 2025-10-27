@@ -1,5 +1,6 @@
--- Create news database
-CREATE DATABASE IF NOT EXISTS news_db;
+-- Create news database (only if it doesn't exist)
+SELECT 'CREATE DATABASE news_db'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'news_db')\gexec
 
 -- Connect to news_db
 \c news_db;
@@ -37,6 +38,16 @@ CREATE TABLE IF NOT EXISTS email_logs (
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(50) DEFAULT 'sent',
     error_message TEXT
+);
+
+-- Create email_preferences table
+CREATE TABLE IF NOT EXISTS email_preferences (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    subscribed BOOLEAN DEFAULT TRUE,
+    preferred_time VARCHAR(5) DEFAULT '07:00', -- '07:00' or '18:00'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes for better performance
