@@ -9,7 +9,7 @@ Sistema que coleta notícias de múltiplos portais, gera resumos executivos com 
 - **Airflow** 2.10 - Orquestração de pipeline
 - **PostgreSQL** 15 - Banco de dados estruturado
 - **MinIO** - Object storage (S3-compatible)
-- **OpenAI** GPT-4o-mini - Sumarização com IA
+- **Azure OpenAI** GPT-4o - Sumarização com IA
 - **BeautifulSoup** 4.12 - Web scraping
 - **Flask** 3.0 - Gerenciamento de preferências
 
@@ -20,30 +20,29 @@ Sistema que coleta notícias de múltiplos portais, gera resumos executivos com 
 Antes de começar, você precisa ter:
 
 1. **Docker** e **Docker Compose** instalados
-2. **Conta OpenAI** com $5 de crédito (dura meses)
+2. **Azure OpenAI Service** com deployment GPT-4o configurado
 3. **Gmail** com verificação em duas etapas ativada
 
 ---
 
 ## Configuração Rápida
 
-### 1. Configurar OpenAI
+### 1. Configurar Azure OpenAI
 
-**a) Criar conta e adicionar créditos:**
+**a) Obter credenciais do Azure OpenAI:**
 ```
-1. Acesse: https://platform.openai.com/signup
-2. Faça login/cadastro
-3. Vá em: https://platform.openai.com/account/billing
-4. Adicione $5 USD no cartão
+1. Tenha acesso ao Azure OpenAI Service
+2. Localize seu endpoint (ex: https://seu-recurso.cognitiveservices.azure.com)
+3. Copie a API Key do seu recurso
+4. Anote o nome do deployment (ex: gpt-4o_Maciel_01)
+5. Confirme a versão da API (ex: 2025-01-01-preview)
 ```
 
-**b) Gerar API Key:**
-```
-1. Acesse: https://platform.openai.com/api-keys
-2. Clique em "Create new secret key"
-3. Nome: "news-summarizer-aps01"
-4. COPIE a chave (começa com sk-proj-)
-```
+**Informações necessárias:**
+- **Endpoint**: URL completa do seu recurso Azure
+- **API Key**: Chave de autenticação (32+ caracteres)
+- **Deployment**: Nome do modelo deployado
+- **API Version**: Versão da API Azure OpenAI
 
 ### 2. Configurar Gmail SMTP
 
@@ -71,8 +70,11 @@ nano .env
 
 **Configure estas variáveis OBRIGATÓRIAS:**
 ```env
-# OpenAI (cole sua chave aqui)
-OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxx
+# Azure OpenAI (cole suas credenciais aqui)
+AZURE_OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+AZURE_OPENAI_ENDPOINT=https://seu-recurso.cognitiveservices.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o_Maciel_01
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
 
 # Gmail SMTP (cole seu email e senha de app)
 SMTP_USER=seu-email@gmail.com
@@ -85,7 +87,6 @@ RECIPIENT_EMAILS=seu-email@gmail.com
 **Outras variáveis já vêm configuradas, mas você pode ajustar:**
 ```env
 NEWS_THEME=economia                    # Tema das notícias
-OPENAI_MODEL=gpt-4o-mini              # Modelo da OpenAI
 SMTP_HOST=smtp.gmail.com              # Servidor SMTP
 SMTP_PORT=587                         # Porta SMTP
 ```
@@ -140,7 +141,7 @@ aps01/
 │   │   └── moneytimes_crawler.py    # Crawler MoneyTimes
 │   │
 │   ├── llm/
-│   │   └── summarizer.py            # Integração OpenAI GPT-4o-mini
+│   │   └── summarizer.py            # Integração Azure OpenAI GPT-4o
 │   │
 │   ├── email/
 │   │   ├── sender.py                # Envio SMTP com templates
@@ -183,7 +184,7 @@ aps01/
 │    └─ MinIO       → HTML completo                           │
 │                                                              │
 │ 4. SUMARIZAÇÃO                                              │
-│    └─ OpenAI GPT-4o-mini → Resumo executivo                 │
+│    └─ Azure OpenAI GPT-4o → Resumo executivo                │
 │                                                              │
 │ 5. ENVIO DE EMAILS                                          │
 │    └─ SMTP → Email HTML com resumo                          │
@@ -279,7 +280,7 @@ docker-compose restart airflow-scheduler
 # Acessar banco de dados
 docker exec -it aps01-postgres-1 psql -U airflow -d news_db
 
-# Ver uso de tokens OpenAI
+# Ver uso de tokens Azure OpenAI
 docker-compose logs | grep "Tokens used"
 
 # Executar testes
@@ -290,25 +291,28 @@ pytest tests/
 
 ## Troubleshooting
 
-### OpenAI: "Invalid API Key"
+### Azure OpenAI: "Invalid API Key"
 **Problema:** Chave incorreta ou expirada
 **Solução:**
 ```bash
-# Verifique se a chave está correta no .env
-cat .env | grep OPENAI_API_KEY
+# Verifique se as credenciais estão corretas no .env
+cat .env | grep AZURE_OPENAI
 
-# Deve começar com: sk-proj-
-# Se não funcionar, gere nova chave em:
-# https://platform.openai.com/api-keys
+# Verifique:
+# - AZURE_OPENAI_API_KEY: deve ter 32+ caracteres
+# - AZURE_OPENAI_ENDPOINT: deve ser URL completa do Azure
+# - AZURE_OPENAI_DEPLOYMENT: nome do deployment no Azure
 ```
 
-### OpenAI: "You exceeded your quota"
-**Problema:** Sem créditos na conta
+### Azure OpenAI: "Deployment not found"
+**Problema:** Nome do deployment incorreto
 **Solução:**
 ```
-1. Adicione créditos: https://platform.openai.com/billing
-2. Mínimo $5 USD
-3. Aguarde 1-2 minutos e tente novamente
+1. Acesse o Azure Portal
+2. Vá para seu recurso Azure OpenAI
+3. Verifique o nome exato do deployment (ex: gpt-4o_Maciel_01)
+4. Atualize AZURE_OPENAI_DEPLOYMENT no .env
+5. Reinicie: docker-compose restart airflow-scheduler
 ```
 
 ### Gmail: "Authentication failed"
@@ -448,26 +452,26 @@ WHERE DATE(sent_at) = CURRENT_DATE;
 
 ## Custos e Performance
 
-### Custos OpenAI
+### Custos Azure OpenAI
 
-**Modelo:** GPT-4o-mini
-- Input: $0.15 por 1M tokens
-- Output: $0.60 por 1M tokens
+**Modelo:** GPT-4o
+- Input: $2.50 por 1M tokens
+- Output: $10.00 por 1M tokens
 
 **Estimativa por execução:**
-- ~2.500 tokens por resumo
-- Custo: ~$0.003-0.005 (~R$0.01-0.03)
+- ~2.500 tokens input + ~800 tokens output
+- Custo: ~$0.014 por resumo
 
 **Mensal (2x/dia):**
 - 60 execuções/mês
-- Custo: ~$0.30 (~R$1.50-3.00)
+- Custo: ~$0.84/mês
 
-**Conclusão:** $5 duram ~4-6 meses
+**Nota:** Custos variam conforme região do Azure e volume de uso
 
 ### Performance
 
 - **Crawling:** ~10-15s por portal
-- **Sumarização:** ~15-20s (OpenAI)
+- **Sumarização:** ~15-20s (Azure OpenAI)
 - **Total por execução:** ~3-5 minutos
 - **Armazenamento:** ~50MB/mês (artigos + resumos)
 
@@ -505,10 +509,12 @@ MINIO_BUCKET_NAME=news-storage
 MINIO_USE_SSL=False
 
 # ============================================
-# OPENAI (OBRIGATÓRIO CONFIGURAR)
+# AZURE OPENAI (OBRIGATÓRIO CONFIGURAR)
 # ============================================
-OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4o-mini
+AZURE_OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+AZURE_OPENAI_ENDPOINT=https://seu-recurso.cognitiveservices.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4o_Maciel_01
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
 
 # ============================================
 # EMAIL SMTP (OBRIGATÓRIO CONFIGURAR)
