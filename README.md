@@ -710,14 +710,10 @@ max_tokens=2000  # Resumo longo
 
 ---
 
-## Licença
-
-Projeto acadêmico - Engenharia de Dados - APS 01
-
----
-
 ## Autor
 
 Gabriel Hermida
+
 Insper - Engenharia de Computação
+
 2025
