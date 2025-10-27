@@ -81,14 +81,17 @@ NOTÍCIAS DO DIA:
 {news_context}
 
 INSTRUÇÕES:
-1. Crie um resumo executivo profissional e conciso
-2. Organize as informações por temas relevantes (ex: mercado financeiro, empresas, economia global)
-3. Destaque os pontos mais importantes e suas implicações
-4. Use bullet points para facilitar a leitura
-5. Mantenha um tom objetivo e informativo
-6. Limite o resumo a aproximadamente 500-700 palavras
+1. PRIMEIRO: Crie um título criativo e chamativo que capture o principal tema do dia (ex: "Guerra Comercial em Alta", "Bolsas em Frenesi", "Tech Giants sob Pressão")
+2. Crie um resumo executivo profissional e conciso
+3. Organize as informações por temas relevantes (ex: mercado financeiro, empresas, economia global)
+4. Destaque os pontos mais importantes e suas implicações
+5. Use bullet points para facilitar a leitura
+6. Mantenha um tom objetivo e informativo
+7. Limite o resumo a aproximadamente 500-700 palavras
 
 FORMATO DO RESUMO:
+TÍTULO: [Seu título criativo aqui - máximo 60 caracteres]
+
 # Resumo de Notícias - {self.theme.title()}
 
 ## Destaques do Dia
@@ -108,7 +111,7 @@ Elabore o resumo agora:"""
 
         return base_prompt
 
-    def summarize(self, articles: List[Dict], max_articles: int = 20) -> Optional[str]:
+    def summarize(self, articles: List[Dict], max_articles: int = 20) -> Optional[Dict]:
         """
         Generate a summary of news articles using OpenAI.
 
@@ -117,7 +120,7 @@ Elabore o resumo agora:"""
             max_articles: Maximum number of articles to summarize
 
         Returns:
-            Summary text or None if failed
+            Dictionary with 'title' and 'summary' keys, or None if failed
         """
         if not articles:
             logger.warning("No articles to summarize")
@@ -147,7 +150,7 @@ Elabore o resumo agora:"""
                 max_tokens=1500
             )
 
-            summary = response.choices[0].message.content
+            summary_raw = response.choices[0].message.content
 
             # Log token usage for cost tracking
             usage = response.usage
@@ -157,7 +160,30 @@ Elabore o resumo agora:"""
                 f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens})"
             )
 
-            return summary
+            # Extract title from summary
+            title = "Resumo Diário de Notícias"  # Default title
+            summary_content = summary_raw
+
+            if summary_raw:
+                # Check for title in various formats (TÍTULO:, **TÍTULO:**, etc)
+                lines = summary_raw.split('\n', 2)
+                first_line = lines[0].strip()
+
+                # Remove markdown formatting and check for "TÍTULO:"
+                clean_line = first_line.replace('**', '').replace('*', '').strip()
+
+                if 'TÍTULO:' in clean_line or 'TITULO:' in clean_line:
+                    # Extract title text
+                    title_text = clean_line.split(':', 1)[1].strip() if ':' in clean_line else clean_line
+                    if title_text and len(title_text) > 3:
+                        title = title_text
+                    # Remove title line from summary
+                    summary_content = '\n'.join(lines[1:]).strip() if len(lines) > 1 else summary_raw
+
+            return {
+                'title': title,
+                'summary': summary_content
+            }
 
         except Exception as e:
             logger.error(f"Error generating summary with OpenAI: {e}")
