@@ -179,13 +179,19 @@ def generate_summary(**context):
     summarizer = NewsSummarizer()
 
     # Generate summary
-    summary_text = summarizer.summarize(
+    summary_result = summarizer.summarize(
         articles,
         max_articles=int(os.getenv('SUMMARY_MAX_NEWS', 20))
     )
 
-    if not summary_text:
+    if not summary_result:
         raise ValueError("Failed to generate summary")
+
+    # Extract title and summary from result
+    summary_title = summary_result.get('title', 'Resumo Diário de Notícias')
+    summary_text = summary_result.get('summary', '')
+
+    logger.info(f"Generated summary with title: '{summary_title}' ({len(summary_text)} characters)")
 
     logger.info(f"Generated summary with {len(summary_text)} characters")
 
@@ -212,6 +218,7 @@ def generate_summary(**context):
         summary_id = db.insert_summary(summary_data)
 
         # Store in XCom for email task
+        ti.xcom_push(key='summary_title', value=summary_title)
         ti.xcom_push(key='summary_text', value=summary_text)
         ti.xcom_push(key='summary_id', value=summary_id)
         ti.xcom_push(key='news_count', value=len(articles))
@@ -233,8 +240,10 @@ def send_emails(**context):
         return 0
 
     ti = context['ti']
+    execution_date = context['execution_date']
 
     # Get summary from XCom
+    summary_title = ti.xcom_pull(key='summary_title', task_ids='generate_summary') or 'Resumo Diário de Notícias'
     summary_text = ti.xcom_pull(key='summary_text', task_ids='generate_summary')
     summary_id = ti.xcom_pull(key='summary_id', task_ids='generate_summary')
     news_count = ti.xcom_pull(key='news_count', task_ids='generate_summary')
@@ -249,25 +258,64 @@ def send_emails(**context):
         logger.warning("No recipients configured")
         return 0
 
-    recipients = [email.strip() for email in recipients_str.split(',') if email.strip()]
+    all_recipients = [email.strip() for email in recipients_str.split(',') if email.strip()]
 
-    # Initialize email sender
+    # Initialize email sender and database
     sender = EmailSender()
     db = NewsDatabase()
 
     try:
         db.connect()
+        cursor = db.conn.cursor()
+
+        # Determine current execution hour
+        current_hour = execution_date.hour
+        target_time = '07:00' if current_hour == 7 else '18:00'
+
+        logger.info(f"Current execution hour: {current_hour}, target time: {target_time}")
+
+        # Filter recipients based on their preferred time
+        filtered_recipients = []
+        for email in all_recipients:
+            cursor.execute("""
+                SELECT preferred_time, subscribed
+                FROM email_preferences
+                WHERE email = %s
+            """, (email,))
+
+            result = cursor.fetchone()
+            if result:
+                preferred_time, subscribed = result
+                if not subscribed:
+                    logger.info(f"{email} is unsubscribed, skipping")
+                elif preferred_time == target_time:
+                    filtered_recipients.append(email)
+                    logger.info(f"{email} matches target time {target_time}")
+                else:
+                    logger.info(f"{email} prefers {preferred_time}, skipping for {target_time}")
+            else:
+                # No preference set, use default (07:00)
+                if target_time == '07:00':
+                    filtered_recipients.append(email)
+                    logger.info(f"{email} has no preference, sending at default time 07:00")
+
+        if not filtered_recipients:
+            logger.info(f"No recipients for {target_time} delivery")
+            return 0
+
+        logger.info(f"Sending to {len(filtered_recipients)} recipients for {target_time}")
 
         # Send email
         success = sender.send_summary_email(
-            recipients=recipients,
+            recipients=filtered_recipients,
             summary_text=summary_text,
             news_count=news_count,
-            theme=os.getenv('NEWS_THEME', 'economia')
+            theme=os.getenv('NEWS_THEME', 'economia'),
+            email_title=summary_title
         )
 
         # Log email sending
-        for recipient in recipients:
+        for recipient in filtered_recipients:
             db.log_email_sent(
                 summary_id=summary_id,
                 recipient=recipient,
@@ -275,12 +323,12 @@ def send_emails(**context):
             )
 
         if success:
-            logger.info(f"Sent emails to {len(recipients)} recipients")
+            logger.info(f"Sent emails to {len(filtered_recipients)} recipients")
         else:
             logger.error("Failed to send emails")
             raise ValueError("Email sending failed")
 
-        return len(recipients)
+        return len(filtered_recipients)
 
     finally:
         db.disconnect()
@@ -328,7 +376,7 @@ with DAG(
     'news_summarizer_daily',
     default_args=default_args,
     description='Daily news summarization pipeline',
-    schedule_interval='0 7 * * *',  # Run daily at 7 AM
+    schedule_interval='0 7,18 * * *',  # Run daily at 7 AM and 6 PM
     start_date=datetime(2024, 1, 1),
     catchup=False,
     tags=['news', 'ml', 'summarization'],
